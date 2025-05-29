@@ -585,6 +585,15 @@ def main():
 
                 toc = time.time()
 
+                ################################ add time computation #################################
+                total_time = toc - tic
+                total_images = base_count
+                avg_time_per_image = total_time / total_images if total_images > 0 else 0
+                logger.info(f"Total time: {total_time:.2f} seconds")
+                logger.info(f"Total images: {total_images}")
+                logger.info(f"Average time per image: {avg_time_per_image:.2f} seconds")
+                ################################ add time computation #################################
+
     logging.info(f"Your samples are ready and waiting for you here: \n{outpath} \n"
           f" \nEnjoy.")
 
