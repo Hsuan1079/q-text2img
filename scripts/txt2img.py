@@ -29,6 +29,13 @@ from qdiff.utils import resume_cali_model, get_train_samples
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
 from transformers import AutoFeatureExtractor
 
+import gc
+
+def release_gpu_memory():
+    torch.cuda.empty_cache()
+    gc.collect()
+
+
 logger = logging.getLogger(__name__)
 
 # load safety model
@@ -426,21 +433,25 @@ def main():
                         if name.isdigit() and int(name) >= 9:
                             logger.info(f"Saving temporary checkpoint at {name}...")
                             torch.save(qnn.state_dict(), os.path.join(outpath, "ckpt.pth"))
-                            
+
                         if isinstance(module, QuantModule):
+                            # module.ignore_reconstruction = True ## 忽略reconstruction   
                             if module.ignore_reconstruction is True:
                                 logger.info('Ignore reconstruction of layer {}'.format(name))
                                 continue
                             else:
                                 logger.info('Reconstruction for layer {}'.format(name))
                                 layer_reconstruction(qnn, module, **kwargs)
+                                release_gpu_memory()
                         elif isinstance(module, BaseQuantBlock):
+                            # module.ignore_reconstruction = True ## 忽略reconstruction  
                             if module.ignore_reconstruction is True:
                                 logger.info('Ignore reconstruction of block {}'.format(name))
                                 continue
                             else:
                                 logger.info('Reconstruction for block {}'.format(name))
                                 block_reconstruction(qnn, module, **kwargs)
+                                release_gpu_memory()
                         else:
                             recon_model(module)
 

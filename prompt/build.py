@@ -14,14 +14,14 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--img-dir',    default='cali_images', help='1024 張實圖資料夾')
 parser.add_argument('--ckpt',       default='models/ldm/stable-diffusion-v1/model.ckpt')
 parser.add_argument('--cfg',        default='configs/stable-diffusion/v1-inference.yaml')
-parser.add_argument('--steps',      type=int, default=5,    help='從 0~999 均勻抽多少步 (這將決定輸出的列表長度)')
+parser.add_argument('--steps',      type=int, default=50,    help='從 0~999 均勻抽多少步 (這將決定輸出的列表長度)')
 parser.add_argument('--enc-batch',  type=int, default=16,    help='encode_first_stage batch size')
 parser.add_argument('--out',        default='sd_cali_steps_revised.pt')
 args = parser.parse_args()
 
 # TIMESTEPS 將包含 args.steps 個唯一的時間步值
-# 例如，如果 args.steps = 50, model_total_timesteps = 1000, TIMESTEPS = [0, 20, 40, ..., 980]
-TIMESTEPS = sorted(list(set(np.round(np.linspace(0, 999, args.steps)).astype(int))))
+# 例如，如果 args.steps = 50, model_total_timesteps = 1000, TIMESTEPS = [1, 21, 41, ..., 981]
+TIMESTEPS = sorted(list(set(np.round(np.linspace(1, 981, args.steps)).astype(int))))
 print(f"將為以下 {len(TIMESTEPS)} 個唯一時間步生成校準數據: {TIMESTEPS}")
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -77,40 +77,40 @@ with torch.no_grad():
     ucs_embedding = ldm_model.get_learned_conditioning(['']*N).cpu() # (N, 77, 768)
 
 # ------------------- 每個 timestep 做 forward noise -------------------
-# Xs, Ts, Cs, Ucs 都將是列表，長度為 len(TIMESTEPS)
-# 每個元素是該時間步下所有 N 個樣本的數據
-Xs_list, Ts_list, Cs_list, Ucs_list = [], [], [], []
+# 預分配張量
+xs = torch.zeros((len(TIMESTEPS), N, 4, 64, 64), dtype=torch.float32)
+ts = torch.zeros((len(TIMESTEPS), N), dtype=torch.long)
+cs = torch.zeros((len(TIMESTEPS), N, 77, 768), dtype=torch.float32)
+ucs = torch.zeros((len(TIMESTEPS), N, 77, 768), dtype=torch.float32)
 
-for t_int in tqdm(TIMESTEPS, desc='生成 x_t 並組織校準數據'):
-    t_tensor_for_all_N_samples = torch.full((N,), t_int, dtype=torch.long) # (N,) on CPU
+for i, t_int in enumerate(tqdm(TIMESTEPS, desc='生成 x_t 並組織校準數據')):
+    # 設置時間步
+    ts[i] = t_int
     
-    # 加噪過程 (與原腳本類似，但確保在 CPU 上操作以節省 GPU 記憶體)
-    # ldm_model.alphas_cumprod 是在 GPU 上的，先取值再 .cpu()
+    # 加噪過程
     a_bar = ldm_model.alphas_cumprod[t_int].cpu().float() # scalar
     sqrt_ab   = torch.sqrt(a_bar)
     sqrt_1mab = torch.sqrt(1.0 - a_bar)
     noise = torch.randn_like(z0) # z0 已在 CPU 上, (N,4,64,64)
-    xt = sqrt_ab * z0 + sqrt_1mab * noise # (N,4,64,64), on CPU
-
-    Xs_list.append(xt)
-    Ts_list.append(t_tensor_for_all_N_samples)
-    Cs_list.append(cond_embedding.clone()) # 每個時間步組都用相同的 (N, 77, 768)
-    Ucs_list.append(ucs_embedding.clone()) # 每個時間步組都用相同的 (N, 77, 768)
+    xs[i] = sqrt_ab * z0 + sqrt_1mab * noise # (N,4,64,64)
+    
+    # 複製條件嵌入
+    cs[i] = cond_embedding
+    ucs[i] = ucs_embedding
 
 # --------------------------- 儲存 ---------------------------
-# 儲存的字典，其值是張量的列表
 data_to_save = {
-    'xs': Xs_list,    # 列表，長度為 len(TIMESTEPS)，每個元素是 (N, 4, 64, 64)
-    'ts': Ts_list,    # 列表，長度為 len(TIMESTEPS)，每個元素是 (N,)
-    'cs': Cs_list,    # 列表，長度為 len(TIMESTEPS)，每個元素是 (N, 77, 768)
-    'ucs': Ucs_list   # 列表，長度為 len(TIMESTEPS)，每個元素是 (N, 77, 768)
+    'xs': xs,      # (steps, N, 4, 64, 64)
+    'ts': ts,      # (steps, N)
+    'cs': cs,      # (steps, N, 77, 768)
+    'ucs': ucs,    # (steps, N, 77, 768)
+    'prompts': prompts
 }
 torch.save(data_to_save, args.out)
 print(f"✅ 校準數據已儲存到 → {args.out}")
-print(f"  數據結構: 'xs', 'ts', 'cs', 'ucs' 都是列表，列表長度為 {len(TIMESTEPS)}")
-if Xs_list:
-    print(f"  例如，列表中第一個元素的形狀:")
-    print(f"    xs[0]: {Xs_list[0].shape}")
-    print(f"    ts[0]: {Ts_list[0].shape}")
-    print(f"    cs[0]: {Cs_list[0].shape}")
-    print(f"    ucs[0]: {Ucs_list[0].shape}")
+print(f"  數據結構:")
+print(f"    xs: {xs.shape}")
+print(f"    ts: {ts.shape}")
+print(f"    cs: {cs.shape}")
+print(f"    ucs: {ucs.shape}")
+print(f"    prompts 長度: {len(prompts)}")

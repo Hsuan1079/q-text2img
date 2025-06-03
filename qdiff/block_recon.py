@@ -6,6 +6,7 @@ from qdiff.quant_model import QuantModel
 from qdiff.quant_block import BaseQuantBlock
 from qdiff.adaptive_rounding import AdaRoundQuantizer
 from qdiff.utils import save_grad_data, save_inp_oup_data
+import gc
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,7 @@ def block_reconstruction(model: QuantModel, block: BaseQuantBlock, cali_data: to
             out_quant = block(cur_inp)
 
         err = loss_func(out_quant, cur_out, cur_grad)
-        err.backward(retain_graph=True)
+        err.backward()
         if multi_gpu:
             raise NotImplementedError
         #     for p in opt_params:
